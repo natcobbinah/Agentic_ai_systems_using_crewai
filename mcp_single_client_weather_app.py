@@ -98,6 +98,75 @@ async def handle_prompt(session, command: str) -> str | None:
         print(f"\nAn error occured during prompt invocation: {e}")
         return None
 
+async def list_resources(session):
+    """
+    Fetches the list of available resources from the connected server
+    and prints them in a user-friendly format
+    """
+    try:
+        resource_response = await session.list_resources()
+
+        if not resource_response or not resource_response.resources:
+            print("\nNo resources found on the server")
+            return 
+        
+        print("\nAvailable Resources:")
+        print("---"*20)
+        for r in resource_response.resources:
+            # the URI is the unique identifier for the resource
+            print(f" Resource URI: {r.uri}")
+            
+            # the description comes from the resource function's docstring
+            if r.description:
+                print(f"    Description: {r.description.strip()}")
+        
+        print("\nUsage: /resource <resource_uri>")
+        print("---"*20)
+    
+    except Exception as e:
+        print(f"Error fetching resources: {e}")
+
+async def handle_resource(session, command: str) -> str | None:
+    """
+    Parses a user command to fetch a specific resource from the server 
+    and returns its content as a single string
+    """
+    try:
+        # The command format is "/resource <resource_uri>"
+        parts = shlex.split(command.strip())
+        if len(parts) != 2:
+            print("\nUsage: /resource <resource_uri>")
+            return None 
+        
+        resource_uri = parts[1]
+
+        print(f"\n---- Fetching resource '{resource_uri}'... ---")
+
+        # use the session's `read_resource` method with the provided uri
+        response = await session.read_resource(resource_uri)
+
+        if not response or not response.contents:
+            print("Error: Resource not found or content is empty")
+            return None 
+        
+        # extract text from all textcontent objects and join them
+        # this handles cases where a resource might be split into multiple parts
+        text_parts = [
+            content.text for content in response.contents if hasattr(content, "text")
+        ]
+
+        if not text_parts:
+            print("Error: Resource content is not in a readable text format")
+            return None 
+        
+        resource_content = "\n".join(text_parts)
+
+        print("--- Resource loaded successfully -----")
+        return resource_content
+    except Exception as e:
+        print(f"\nAn error occured while fetching the resource: {e}")
+        return None 
+
 # langgraph state definition
 class State(TypedDict):
     messages: Annotated[List[AnyMessage], add_messages]
@@ -155,8 +224,13 @@ async def main():
             print("Type a question, or use one of the following commands:")
             print(" /prompts                          - to list available prompts")
             print(" /prompt <prompt_name> \"args\"..  - to run a specific prompt")
+            print(" /resources                        - to list available resources")
+            print(" /resource <resource_uri> \"args\"..  - to load a resource for the agent")
 
             while True:
+                # this variable will hold the final message to be sent to the agent
+                message_to_agent = ""
+
                 user_input = input("\nYou:").strip()
                 if user_input.lower() in {"exit", "exit", "q"}:
                     break 
@@ -164,6 +238,10 @@ async def main():
                 # command handling logic 
                 if user_input.lower() == "/prompts":
                     await list_prompts(session)
+                    continue # command is done, loop back for next input
+                
+                elif user_input.lower() == "/resources":
+                    await list_resources(session)
                     continue # command is done, loop back for next input
 
                 elif user_input.startswith("/prompt"):
@@ -173,6 +251,37 @@ async def main():
                         message_to_agent = prompt_text
                     else: 
                         # if prompt fetching failed, loop back for next input
+                        continue
+                
+                elif user_input.startswith("/resource"):
+                    # fetch the resource content using our new function
+                    resource_content = await handle_resource(session, user_input)
+
+                    if resource_content:
+                        # ask the user what action to take on the loaded content
+                        action_prompt = input("Resource loaded. What should  I do with this content? (Press Enter to just save to context)\n").strip()
+
+                        # if user provides an action, combine it with the resource content
+                        if action_prompt:
+                            message_to_agent =f"""
+                            CONTEXT from a loaded resource:
+                            ------
+                            {resource_content}
+                            ------
+                            TASK: {action_prompt}
+                            """
+                        # if user provides no action, create a default message to save the context
+                        else:
+                            print("No action specified. Adding resource content to conversation memory...")
+                            message_to_agent=f"""
+                            Please remember the following context for our conversation. Just acknowledge that you have received it.
+                            ---
+                            CONTEXT:
+                            {resource_content}
+                            ----
+                            """
+                    else:
+                        # if resource loading failed, loop back for next input
                         continue
                 
                 else:

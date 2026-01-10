@@ -1,6 +1,7 @@
 import os 
 import requests 
 from mcp.server.fastmcp import FastMCP
+from pathlib import  Path
 
 OPENWEATHER_API_KEY="YOUR OPENWEATHER API KEY HERE"
 
@@ -102,6 +103,25 @@ def compare_weather_prompt(location_a: str, location_b: str) -> str:
     3. Instead, synthesize the information into a concise summary. Your final response should highlight the key differences, focusing on temperature, the general conditions (eg. sunny vs rainy) and wind speed
     4. Present the comparison in a structured format, like a markdown table or a clear bulleted list, to make it easy for the user to understand at a glance
     """
+
+@mcp.resource("file://delivery_log")
+def delivery_log_resource() -> list[str]:
+    """
+    Reads a delivery log file and returns its contents as a list of lines.
+    Each line contains an order number and a delivery location
+    
+    :return: Description
+    :rtype: list[str]
+    """
+    try:
+        log_file = Path("mcp_resourcefile_delivery_log.txt")
+        if not log_file.exists():
+            return ["Error: The delivery_log.txt file was not found on the server"]
+
+        # read the file, remove leading/trailing whitespace, and split into lines
+        return log_file.read_text(encoding="utf-8").strip().splitlines()
+    except Exception as e:
+        return [f"An unexpected error occured while reading the delivery log: {str(e)}"]
     
 if __name__ == "__main__":
     # the server will run and listen for requests from the client over stdio
