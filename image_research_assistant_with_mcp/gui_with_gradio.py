@@ -9,6 +9,7 @@ from typing_extensions import TypedDict
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+import gradio as gr
 
 # Import the MultiServerMCPClient
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -74,27 +75,52 @@ async def main():
 
     agent = create_graph(all_tools)
 
-    print("The image assistant is ready")
+    print("The image research assistant is ready and launching on a web ui")
 
-    while True: 
-        user_input = input("\nYou: ").strip() 
-        if user_input.lower() in {"exit", "quit", "q"}:
-            break 
+    with gr.Blocks(theme=gr.themes.Default(primary_hue="blue")) as demo:
+        gr.Markdown("# Image Research Assistant")
+        chatbot = gr.Chatbot(label="Conversation", height=500)
 
-        try: 
+        with gr.Row():
+            image_box = gr.Image(type="filepath", label="Upload an image")
+
+            text_box = gr.Textbox(
+                label="Ask a question about the image or a general research question",
+                scale=2
+            )
+        
+        submit_btn=gr.Button("Submit", variant="primary")
+
+        async def get_agent_response(user_text, image_path, chat_history):
+            if image_path: 
+                full_message = f"{user_text} {image_path}"
+
+                chat_history.append(((image_path,), None))
+                chat_history.append((user_text, None))
+            else:
+                full_message = user_text
+                chat_history.append((user_text, None))
+
             response = await agent.ainvoke(
-                {"messages": [
-                    ("user", user_input)
-                ]},
+                {"messages": [("user", full_message)]},
                 config={
-                    "configurable": {
-                        "thread_id": "multi-server-session"
-                    }
+                    "configurable": {"thread_id": "gradio_session"}
                 }
             )
-            print("AI:", response["messages"][-1].content)
-        except Exception as e: 
-            print("Error:", e)
+
+            bot_message = response["messages"][-1].content
+            chat_history.append((None, bot_message))
+
+            return "", chat_history, None # clear textbox, return updated history, clear imagebox
+
+        submit_btn.clikc(
+            get_agent_response,
+            [text_box, image_box, chatbot],
+            [text_box, chatbot, image_box]
+        )
+    
+    demo.launch(server_name="0.0.0.0")
+    
 
 if __name__ == "__main__":
     asyncio.run(main())
